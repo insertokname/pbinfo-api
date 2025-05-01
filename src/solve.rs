@@ -2,7 +2,10 @@ use std::time::Duration;
 
 use reqwest::StatusCode;
 
-use crate::upload;
+use crate::{
+    pbinfo_user::PbinfoUser,
+    upload,
+};
 
 use super::UploadError;
 
@@ -62,7 +65,7 @@ pub enum SolveError {
     },
 }
 
-pub async fn solve(problem_id: &str, ssid: &str) -> Result<String, SolveError> {
+pub async fn solve(problem_id: &str, pbinfo_user: &PbinfoUser) -> Result<String, SolveError> {
     let correct_solution =
         get_raw_solution(problem_id)
             .await
@@ -72,7 +75,7 @@ pub async fn solve(problem_id: &str, ssid: &str) -> Result<String, SolveError> {
             })?;
 
     loop {
-        match upload(&problem_id, &correct_solution, &ssid).await {
+        match upload(&problem_id, &correct_solution, pbinfo_user).await {
             Ok(ok) => return Ok(ok),
             Err(err) => match err {
                 UploadError::CooldownError => {

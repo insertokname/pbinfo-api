@@ -1,6 +1,6 @@
 mod login;
 mod upload;
-pub mod user_config;
+pub mod pbinfo_user;
 
 pub mod score;
 pub mod solve;

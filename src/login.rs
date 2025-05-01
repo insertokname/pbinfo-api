@@ -1,6 +1,8 @@
 use reqwest::header::InvalidHeaderValue;
 use thiserror::Error;
 
+use crate::pbinfo_user::PbinfoUser;
+
 #[derive(Error, Debug)]
 pub enum LoginError {
     #[error("Error: didn't get back an ssid cookie!\nLogin failed!\nUsername/Email and password may be incorect! OR Maybe you tried logging in too many times!")]
@@ -107,12 +109,7 @@ enum LoginHelperStatus {
     RenewedSsid,
 }
 
-async fn login_helper(
-    email: &str,
-    password: &str,
-    form_token: &mut String,
-    ssid: &mut String,
-) -> Result<LoginHelperStatus, LoginError> {
+async fn login_helper(pbinfo_user: &mut PbinfoUser) -> Result<LoginHelperStatus, LoginError> {
     let client: reqwest::Client =
         reqwest::Client::builder()
             .build()
@@ -123,12 +120,12 @@ async fn login_helper(
     let mut headers = reqwest::header::HeaderMap::new();
     headers.insert("Origin", "https://www.pbinfo.ro".parse()?);
     headers.insert("Referer", "https://www.pbinfo.ro/".parse()?);
-    headers.insert("Cookie", format!("SSID={ssid}").parse()?);
+    headers.insert("Cookie", format!("SSID={}", pbinfo_user.ssid).parse()?);
 
     let form_data = reqwest::multipart::Form::new()
-        .text("user", email.to_string())
-        .text("parola", password.to_string())
-        .text("form_token", form_token.to_string());
+        .text("user", pbinfo_user.email.to_string())
+        .text("parola", pbinfo_user.password.to_string())
+        .text("form_token", pbinfo_user.form_token.to_string());
 
     let login_url = "https://www.pbinfo.ro/ajx-module/php-login.php";
     let response = client
@@ -143,7 +140,7 @@ async fn login_helper(
         })?;
 
     if let Ok(new_ssid) = try_get_ssid(&response) {
-        *ssid = new_ssid;
+        pbinfo_user.ssid = new_ssid;
         return Ok(LoginHelperStatus::RenewedSsid);
     }
 
@@ -161,17 +158,17 @@ async fn login_helper(
         })?;
     let new_form_token = table["form_token"].to_string();
 
-    *form_token = new_form_token[1..new_form_token.len() - 1].to_string();
+    pbinfo_user.form_token = new_form_token[1..new_form_token.len() - 1].to_string();
 
     let mut new_headers = reqwest::header::HeaderMap::new();
     new_headers.insert("Origin", "https://www.pbinfo.ro".parse()?);
     new_headers.insert("Referer", "https://www.pbinfo.ro/".parse()?);
-    new_headers.insert("Cookie", format!("SSID={ssid}").parse()?);
+    new_headers.insert("Cookie", format!("SSID={}", pbinfo_user.ssid).parse()?);
 
     let new_form_data = reqwest::multipart::Form::new()
-        .text("user", email.to_string())
-        .text("parola", password.to_string())
-        .text("form_token", form_token.to_string());
+        .text("user", pbinfo_user.email.to_string())
+        .text("parola", pbinfo_user.password.to_string())
+        .text("form_token", pbinfo_user.form_token.to_string());
 
     let login_url = "https://www.pbinfo.ro/ajx-module/php-login.php";
     let response = client
@@ -185,36 +182,29 @@ async fn login_helper(
             err: err.to_string(),
         })?;
 
-    *ssid = try_get_ssid(&response)?;
+    pbinfo_user.ssid = try_get_ssid(&response)?;
 
     Ok(LoginHelperStatus::RenewedEverything)
 }
 
-/// Makes sure a user is logged in, if not logs in the user with the 
+/// Makes sure a user is logged in, if not logs in the user with the
 /// provided credentials
 ///
 /// # Arguments
 ///
-/// * `email` - The email of the user to be logged in
-/// * `password` - The password of the user to be logged in
-/// * `form_token` - The form_token of the user to be logged in
-/// * `ssid` - The ssid of the user to be logged in
-pub async fn login(
-    email: &str,
-    password: &str,
-    form_token: &mut String,
-    ssid: &mut String,
-) -> Result<(), LoginError> {
-    if let Ok(is_logged_in) = is_logged_in(&ssid).await {
+/// * `pbinfo_user` - A PbinfoUser that will be mutated so that it will
+/// be logged in
+pub async fn login(pbinfo_user: &mut PbinfoUser) -> Result<(), LoginError> {
+    if let Ok(is_logged_in) = is_logged_in(&pbinfo_user.ssid).await {
         if is_logged_in {
             log::info!("User already logged in!");
             return Ok(());
         }
     }
 
-    match login_helper(email, password, form_token, ssid).await? {
+    match login_helper(pbinfo_user).await? {
         LoginHelperStatus::RenewedSsid => {
-            login_helper(email, password, form_token, ssid).await?;
+            login_helper(pbinfo_user).await?;
             return Ok(());
         }
         LoginHelperStatus::RenewedEverything => {

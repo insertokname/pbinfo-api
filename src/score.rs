@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
 
+use crate::pbinfo_user::PbinfoUser;
+
 #[derive(Error, Debug)]
 pub enum GetScoreError {
     #[error("There was an error while getting the status of a score!\nError was {}",(*err).to_string())]
@@ -38,13 +40,18 @@ pub enum ScoreStatus {
 ///
 /// # Arguments
 ///
-/// * `sol_id` - id of the solution to get the score of
-/// * `ssid` - ssid of the user
-pub async fn get_score(sol_id: &str, ssid: &str) -> Result<ScoreStatus, GetScoreError> {
+/// * `pbinfo_user` - logged in user
+pub async fn get_score(
+    sol_id: &str,
+    pbinfo_user: &PbinfoUser,
+) -> Result<ScoreStatus, GetScoreError> {
     let client = reqwest::Client::builder().build()?;
 
     let mut headers = reqwest::header::HeaderMap::new();
-    headers.insert("Cookie", HeaderValue::from_str(&format!("SSID={ssid}"))?);
+    headers.insert(
+        "Cookie",
+        HeaderValue::from_str(&format!("SSID={}", pbinfo_user.ssid))?,
+    );
     let request = client
         .request(
             reqwest::Method::POST,
@@ -71,11 +78,14 @@ pub async fn get_score(sol_id: &str, ssid: &str) -> Result<ScoreStatus, GetScore
 }
 
 /// Awaits the score to finish evaluation while pooling it every 1500 milliseconds
-pub async fn pool_score(solution_id: &str, ssid: &str) -> Result<Value, GetScoreError> {
+pub async fn pool_score(
+    solution_id: &str,
+    pbinfo_user: &PbinfoUser,
+) -> Result<Value, GetScoreError> {
     let mut tries = 60;
     tokio::time::sleep(Duration::from_millis(1500)).await;
     while tries > 0 {
-        match get_score(solution_id, ssid).await? {
+        match get_score(solution_id, pbinfo_user).await? {
             ScoreStatus::StillExecuting => {
                 tokio::time::sleep(Duration::from_millis(1500)).await;
                 log::info!("Program is still being evaluated...!");
@@ -83,7 +93,7 @@ pub async fn pool_score(solution_id: &str, ssid: &str) -> Result<Value, GetScore
             ScoreStatus::DoneExecuting { value } => {
                 // one last force_reload of the score so that pbinfo
                 // actually displays the score on the site
-                let _ = get_score(solution_id, ssid).await;
+                let _ = get_score(solution_id, pbinfo_user).await;
                 return Ok(value);
             }
         }
@@ -95,12 +105,12 @@ pub async fn pool_score(solution_id: &str, ssid: &str) -> Result<Value, GetScore
 
 async fn check_problem_exists(
     problem_id: &str,
-    ssid: &str,
+    pbinfo_user: &PbinfoUser,
 ) -> Result<bool, Box<dyn std::error::Error>> {
     let client = reqwest::Client::builder().build()?;
 
     let mut headers = reqwest::header::HeaderMap::new();
-    headers.insert("Cookie", format!("SSID={ssid}").parse()?);
+    headers.insert("Cookie", format!("SSID={}", pbinfo_user.ssid).parse()?);
     let request = client
         .request(
             reqwest::Method::POST,
@@ -138,18 +148,18 @@ pub enum TopSolutionResponseType {
 async fn get_last_n_solutions(
     problem_id: &str,
     sol_number: u32,
-    ssid: &str,
-    id_user: &str,
+    pbinfo_user: &PbinfoUser,
 ) -> Result<Value, Box<dyn std::error::Error>> {
     let client = reqwest::Client::builder().build()?;
 
     let mut headers = reqwest::header::HeaderMap::new();
-    headers.insert("Cookie", format!("SSID={ssid}").parse()?);
+    headers.insert("Cookie", format!("SSID={}", pbinfo_user.ssid).parse()?);
     let request = client
         .request(
             reqwest::Method::POST,
             format!(
-                "https://www.pbinfo.ro/ajx-module/ajx-solutii-lista-json.php?id_problema={problem_id}&id_user={id_user}&numar_solutii={sol_number}"
+                "https://www.pbinfo.ro/ajx-module/ajx-solutii-lista-json.php?id_problema={problem_id}&id_user={}&numar_solutii={sol_number}"
+                , pbinfo_user.user_id
             ),
         )
         .headers(headers);
@@ -159,15 +169,15 @@ async fn get_last_n_solutions(
     Ok(serde_json::from_str(&text)?)
 }
 
-pub async fn get_top_score(problem_id: &str, ssid: &str, id_user: &str) -> TopSolutionResponseType {
-    match try_repeated(3, || check_problem_exists(problem_id, ssid)).await {
+pub async fn get_top_score(problem_id: &str, pbinfo_user: &PbinfoUser) -> TopSolutionResponseType {
+    match try_repeated(3, || check_problem_exists(problem_id, pbinfo_user)).await {
         Ok(false) => return TopSolutionResponseType::ProblemNotFound,
         Ok(true) => (),
         Err(err) => return TopSolutionResponseType::PageError(err.to_string()),
     };
 
     let last_solution =
-        match try_repeated(3, || get_last_n_solutions(problem_id, 1, ssid, id_user)).await {
+        match try_repeated(3, || get_last_n_solutions(problem_id, 1, pbinfo_user)).await {
             Ok(ok) => ok,
             Err(err) => return TopSolutionResponseType::PageError(err.to_string()),
         };
@@ -183,7 +193,7 @@ pub async fn get_top_score(problem_id: &str, ssid: &str, id_user: &str) -> TopSo
     }
 
     let all_solutions = match try_repeated(3, || {
-        get_last_n_solutions(problem_id, sol_number as u32, ssid, id_user)
+        get_last_n_solutions(problem_id, sol_number as u32, pbinfo_user)
     })
     .await
     {

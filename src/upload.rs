@@ -2,6 +2,8 @@ use log::{error, info};
 use reqwest::StatusCode;
 use thiserror::Error;
 
+use crate::pbinfo_user::PbinfoUser;
+
 #[derive(Debug, Error)]
 pub enum ResponseIdError {
     #[error("Error: An unknown upload error happened!\nResponse from pbinfo was: {response}")]
@@ -84,7 +86,7 @@ async fn get_encoded_sursa(
 async fn upload_helper(
     problem_id: &str,
     source: &str,
-    ssid: &str,
+    pbinfo_user: &PbinfoUser,
 ) -> Result<String, Box<dyn std::error::Error>> {
     let client = reqwest::Client::builder().build()?;
 
@@ -94,7 +96,7 @@ async fn upload_helper(
         "Referer",
         format!("https://www.pbinfo.ro/probleme/{problem_id}").parse()?,
     );
-    headers.insert("Cookie", format!("SSID={ssid}").parse()?);
+    headers.insert("Cookie", format!("SSID={}", pbinfo_user.ssid).parse()?);
 
     let encoded_sursa = get_encoded_sursa(problem_id, &client, headers.clone()).await?;
 
@@ -161,8 +163,12 @@ fn get_response_id(response: String) -> Result<String, ResponseIdError> {
 /// * `problem_id` - the id of the problem
 /// * `source` - the source to be uploaded for evaluation
 /// * `ssid` - ssid of the user (basically login session )
-pub async fn upload(problem_id: &str, source: &str, ssid: &str) -> Result<String, UploadError> {
-    let response = upload_helper(problem_id, source, ssid)
+pub async fn upload(
+    problem_id: &str,
+    source: &str,
+    pbinfo_user: &PbinfoUser,
+) -> Result<String, UploadError> {
+    let response = upload_helper(problem_id, source, pbinfo_user)
         .await
         .map_err(|err| UploadError::UploadError {
             err: err.to_string(),
