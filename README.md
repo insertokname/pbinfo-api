@@ -1,3 +1,5 @@
+# TODO redo for api docs
+
 # pbinfo-cli
 
 This project is a command line interface for pbinfo. It is written in rust and uses reqwest for making gets and posts. 

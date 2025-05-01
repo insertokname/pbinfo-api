@@ -1,8 +1,8 @@
 [package]
-name = "pbinfo-cli"
+name = "pbinfo-api"
 version = "1.0.0"
 edition = "2021"
-description = "A cli tool for uploading solutions to pbinfo.ro"
+description = "A rust api for pbinfo"
 license = "GPL2"
 authors = ["https://github.com/insertokername/"]
 

@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use reqwest::StatusCode;
 
-use crate::api;
+use crate::upload;
 
 use super::UploadError;
 
@@ -71,9 +71,8 @@ pub async fn solve(problem_id: &str, ssid: &str) -> Result<String, SolveError> {
                 err: err.to_string(),
             })?;
 
-
     loop {
-        match api::upload(&problem_id, &correct_solution, &ssid).await {
+        match upload(&problem_id, &correct_solution, &ssid).await {
             Ok(ok) => return Ok(ok),
             Err(err) => match err {
                 UploadError::CooldownError => {
