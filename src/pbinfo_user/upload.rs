@@ -1,4 +1,3 @@
-use log::{error, info};
 use reqwest::StatusCode;
 use thiserror::Error;
 
@@ -64,7 +63,6 @@ async fn get_encoded_sursa(
     // {page html}
     // $("#eedd451d5e1eb7dfd9c6e3a0e918f02cc2a87d03").val(Editor.getValue());
     // {continuation page html}
-    // and we are extracting "eedd451d5e1eb7dfd9c6e3a0e918f02cc2a87d03"
     let marker = ".val(Editor.getValue())";
     let before = body
         .split(marker)
@@ -156,13 +154,6 @@ fn get_response_id(response: String) -> Result<String, ResponseIdError> {
     Ok(table["id_solutie"].to_string())
 }
 
-/// Uploads a source and returns a **solution** id
-///
-/// # Arguments
-///
-/// * `problem_id` - the id of the problem
-/// * `source` - the source to be uploaded for evaluation
-/// * `ssid` - ssid of the user (basically login session )
 pub async fn upload(
     problem_id: &str,
     source: &str,
@@ -181,6 +172,5 @@ pub async fn upload(
             err: err.to_string(),
         },
     })?;
-    info!("Upload succefull!");
     Ok(response_id)
 }

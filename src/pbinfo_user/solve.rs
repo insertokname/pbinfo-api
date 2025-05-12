@@ -2,10 +2,8 @@ use std::time::Duration;
 
 use reqwest::StatusCode;
 
-use crate::{
-    pbinfo_user::PbinfoUser,
-    upload,
-};
+use super::upload::upload;
+use crate::pbinfo_user::PbinfoUser;
 
 use super::UploadError;
 
@@ -79,7 +77,6 @@ pub async fn solve(problem_id: &str, pbinfo_user: &PbinfoUser) -> Result<String,
             Ok(ok) => return Ok(ok),
             Err(err) => match err {
                 UploadError::CooldownError => {
-                    log::error!("Too many solutions uploaded in too short of a time!\nWaiting 11 seconds and trying again");
                     tokio::time::sleep(Duration::from_secs(11)).await;
                 }
                 err => {

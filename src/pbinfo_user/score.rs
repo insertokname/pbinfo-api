@@ -37,10 +37,6 @@ pub enum ScoreStatus {
 }
 
 /// Returns the score of a given solution
-///
-/// # Arguments
-///
-/// * `pbinfo_user` - logged in user
 pub async fn get_score(
     sol_id: &str,
     pbinfo_user: &PbinfoUser,
@@ -88,7 +84,6 @@ pub async fn pool_score(
         match get_score(solution_id, pbinfo_user).await? {
             ScoreStatus::StillExecuting => {
                 tokio::time::sleep(Duration::from_millis(1500)).await;
-                log::info!("Program is still being evaluated...!");
             }
             ScoreStatus::DoneExecuting { value } => {
                 // one last force_reload of the score so that pbinfo
@@ -136,12 +131,19 @@ where
     f().await
 }
 
+/// Information about a certain problem like: if the user solved it,
+/// if they do, does their solution have 100 points, etc..
 #[derive(Debug, Serialize, Deserialize)]
 pub enum TopSolutionResponseType {
+    /// This problem has been solved and has 100 points
     PerfectSolution,
+    /// This problem has only been attempted and doesn't have 100 points
     ImperfectSolution,
+    /// This problem hasn't been atempted
     NoSolution,
+    /// This problem was not found
     ProblemNotFound,
+    /// There was an error while parsing the response of the server
     PageError(String),
 }
 
@@ -169,6 +171,9 @@ async fn get_last_n_solutions(
     Ok(serde_json::from_str(&text)?)
 }
 
+/// Returns information about the top solution given to a problem
+/// (if it has been solved, is the solution perfect, does problem even
+/// exist, etc...)
 pub async fn get_top_score(problem_id: &str, pbinfo_user: &PbinfoUser) -> TopSolutionResponseType {
     match try_repeated(3, || check_problem_exists(problem_id, pbinfo_user)).await {
         Ok(false) => return TopSolutionResponseType::ProblemNotFound,

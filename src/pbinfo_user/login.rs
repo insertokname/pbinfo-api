@@ -1,4 +1,6 @@
-use reqwest::header::InvalidHeaderValue;
+use std::collections::HashMap;
+
+use reqwest::{header::InvalidHeaderValue, Response};
 use thiserror::Error;
 
 use crate::pbinfo_user::PbinfoUser;
@@ -19,6 +21,10 @@ pub enum LoginError {
     ResponseParseError { err: String },
     #[error("Error: Couldn't parse the following text to a json:\n{json}\nGot error:\n{err}")]
     JsonParseError { json: String, err: String },
+    #[error("Error: Utilizator / parola incorecte!")]
+    IncorrectUsernameOrPasswordError,
+    #[error("Error: There was no user id found in the body of pbinfo!")]
+    NoUserIdError,
 }
 
 impl From<InvalidHeaderValue> for LoginError {
@@ -27,48 +33,6 @@ impl From<InvalidHeaderValue> for LoginError {
             err: err.to_string(),
         }
     }
-}
-
-async fn is_logged_in(ssid: &str) -> Result<bool, LoginError> {
-    let client: reqwest::Client =
-        reqwest::Client::builder()
-            .build()
-            .map_err(|err| LoginError::RequestBuildError {
-                err: err.to_string(),
-            })?;
-
-    let mut headers = reqwest::header::HeaderMap::new();
-    headers.insert("Cookie", format!("SSID={ssid}").parse()?);
-
-    let verify_login_url = "https://www.pbinfo.ro/ajx-module/php-verificare-mesaje-noi.php";
-    let response = client
-        .request(reqwest::Method::POST, verify_login_url)
-        .headers(headers)
-        .send()
-        .await
-        .map_err(|err| LoginError::RequestSendError {
-            url: verify_login_url.to_string(),
-            err: err.to_string(),
-        })?;
-
-    let text = response
-        .text()
-        .await
-        .map_err(|err| LoginError::ResponseParseError {
-            err: err.to_string(),
-        })?;
-
-    if text.is_empty() {
-        return Ok(false);
-    }
-
-    let table: serde_json::Value =
-        serde_json::from_str(&text).map_err(|err| LoginError::JsonParseError {
-            json: text,
-            err: err.to_string(),
-        })?;
-
-    Ok(table.get("conversatii").is_some())
 }
 
 fn try_get_ssid(response: &reqwest::Response) -> Result<String, LoginError> {
@@ -104,12 +68,7 @@ fn try_get_ssid(response: &reqwest::Response) -> Result<String, LoginError> {
         .map(|x| x.to_string())
 }
 
-enum LoginHelperStatus {
-    RenewedEverything,
-    RenewedSsid,
-}
-
-async fn login_helper(pbinfo_user: &mut PbinfoUser) -> Result<LoginHelperStatus, LoginError> {
+async fn get_login_response(pbinfo_user: &mut PbinfoUser) -> Result<Response, LoginError> {
     let client: reqwest::Client =
         reqwest::Client::builder()
             .build()
@@ -122,28 +81,30 @@ async fn login_helper(pbinfo_user: &mut PbinfoUser) -> Result<LoginHelperStatus,
     headers.insert("Referer", "https://www.pbinfo.ro/".parse()?);
     headers.insert("Cookie", format!("SSID={}", pbinfo_user.ssid).parse()?);
 
-    let form_data = reqwest::multipart::Form::new()
-        .text("user", pbinfo_user.email.to_string())
-        .text("parola", pbinfo_user.password.to_string())
-        .text("form_token", pbinfo_user.form_token.to_string());
+    // 'Content-Type: application/x-www-form-urlencoded; charset=UTF-8'
+
+    let mut form_data = HashMap::new();
+    form_data.insert("user", pbinfo_user.email.as_str());
+    form_data.insert("parola", pbinfo_user.password.as_str());
+    form_data.insert("form_token", pbinfo_user.form_token.as_str());
 
     let login_url = "https://www.pbinfo.ro/ajx-module/php-login.php";
     let response = client
         .request(reqwest::Method::POST, login_url)
         .headers(headers)
-        .multipart(form_data)
+        .form(&form_data)
         .send()
         .await
         .map_err(|err| LoginError::RequestSendError {
             url: login_url.to_string(),
             err: err.to_string(),
         })?;
+    Ok(response)
+}
 
-    if let Ok(new_ssid) = try_get_ssid(&response) {
-        pbinfo_user.ssid = new_ssid;
-        return Ok(LoginHelperStatus::RenewedSsid);
-    }
-
+async fn get_login_response_body(
+    response: reqwest::Response,
+) -> Result<serde_json::Value, LoginError> {
     let text = response
         .text()
         .await
@@ -156,59 +117,95 @@ async fn login_helper(pbinfo_user: &mut PbinfoUser) -> Result<LoginHelperStatus,
             json: text,
             err: err.to_string(),
         })?;
-    let new_form_token = table["form_token"].to_string();
 
-    pbinfo_user.form_token = new_form_token[1..new_form_token.len() - 1].to_string();
+    Ok(table)
+}
 
-    let mut new_headers = reqwest::header::HeaderMap::new();
-    new_headers.insert("Origin", "https://www.pbinfo.ro".parse()?);
-    new_headers.insert("Referer", "https://www.pbinfo.ro/".parse()?);
-    new_headers.insert("Cookie", format!("SSID={}", pbinfo_user.ssid).parse()?);
+/// Returns the user id for a user. This must be scraped out of the
+/// source html with a bit of rust magic
+async fn get_user_id(pbinfo_user: &mut PbinfoUser) -> Result<String, LoginError> {
+    let client: reqwest::Client =
+        reqwest::Client::builder()
+            .build()
+            .map_err(|err| LoginError::RequestBuildError {
+                err: err.to_string(),
+            })?;
 
-    let new_form_data = reqwest::multipart::Form::new()
-        .text("user", pbinfo_user.email.to_string())
-        .text("parola", pbinfo_user.password.to_string())
-        .text("form_token", pbinfo_user.form_token.to_string());
+    let mut headers = reqwest::header::HeaderMap::new();
+    headers.insert("Origin", "https://www.pbinfo.ro".parse()?);
+    headers.insert("Referer", "https://www.pbinfo.ro/".parse()?);
+    headers.insert("Cookie", format!("SSID={}", pbinfo_user.ssid).parse()?);
 
-    let login_url = "https://www.pbinfo.ro/ajx-module/php-login.php";
+    let url = "https://www.pbinfo.ro".to_string();
+
     let response = client
-        .request(reqwest::Method::POST, login_url)
-        .headers(new_headers)
-        .multipart(new_form_data)
+        .request(reqwest::Method::GET, url.as_str())
+        .headers(headers)
         .send()
         .await
-        .map_err(|err| LoginError::RequestSendError {
-            url: login_url.to_string(),
+        .map_err(|e| LoginError::RequestSendError {
+            url: url,
+            err: e.to_string(),
+        })?;
+
+    let body = response
+        .text()
+        .await
+        .map_err(|err| LoginError::ResponseParseError {
             err: err.to_string(),
         })?;
 
-    pbinfo_user.ssid = try_get_ssid(&response)?;
+    // we are looking for the user id in a string that looks something
+    // like this:
+    // {page html}
+    // user_autentificat = {"id":XXXXXX,
+    // {continuation page html}
+    let marker = "user_autentificat = {\"id\":";
+    let before =
+        body.split(marker)
+            .skip(1)
+            .next()
+            .ok_or_else(|| LoginError::ResponseParseError {
+                err: "Didn't find anything after user_autentificat = {\"id\":".to_string(),
+            })?;
 
-    Ok(LoginHelperStatus::RenewedEverything)
+    let user_id: String = before.chars().take_while(|&c| c != ',').collect();
+
+    Ok(user_id)
 }
 
 /// Makes sure a user is logged in, if not logs in the user with the
 /// provided credentials
-///
-/// # Arguments
-///
-/// * `pbinfo_user` - A PbinfoUser that will be mutated so that it will
-/// be logged in
 pub async fn login(pbinfo_user: &mut PbinfoUser) -> Result<(), LoginError> {
-    if let Ok(is_logged_in) = is_logged_in(&pbinfo_user.ssid).await {
-        if is_logged_in {
-            log::info!("User already logged in!");
-            return Ok(());
-        }
+    let user_id = get_user_id(pbinfo_user).await?;
+    if user_id != "0" && user_id != "" {
+        return Ok(());
+    }
+    pbinfo_user.user_id = user_id;
+
+    let response = get_login_response(pbinfo_user).await?;
+    let maybe_ssid = try_get_ssid(&response);
+
+    let val = get_login_response_body(response).await?;
+    if val["raspuns"] == "Formularul a expirat. Încearcă din nou!" {
+        pbinfo_user.form_token = val["form_token"]
+            .to_string()
+            .trim_start_matches("\"")
+            .trim_end_matches("\"")
+            .to_string();
+    } else {
+        pbinfo_user.ssid = maybe_ssid?;
+        pbinfo_user.user_id = get_user_id(pbinfo_user).await?;
+        return Ok(());
     }
 
-    match login_helper(pbinfo_user).await? {
-        LoginHelperStatus::RenewedSsid => {
-            login_helper(pbinfo_user).await?;
-            return Ok(());
-        }
-        LoginHelperStatus::RenewedEverything => {
-            return Ok(());
-        }
+    let response = get_login_response(pbinfo_user).await?;
+    let maybe_ssid = try_get_ssid(&response);
+    let val = get_login_response_body(response).await?;
+    if val["raspuns"] == "Utilizator/parola incorecte!" {
+        return Err(LoginError::IncorrectUsernameOrPasswordError);
     }
+    pbinfo_user.ssid = maybe_ssid?;
+    pbinfo_user.user_id = get_user_id(pbinfo_user).await?;
+    Ok(())
 }
