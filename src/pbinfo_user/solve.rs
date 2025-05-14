@@ -1,5 +1,4 @@
 use std::sync::LazyLock;
-use std::time::Duration;
 
 use reqwest::StatusCode;
 use serde_json::Value;
@@ -82,20 +81,10 @@ pub async fn solve(problem_id: &str, pbinfo_user: &PbinfoUser) -> Result<String,
                 err: err.to_string(),
             })?;
 
-    loop {
-        match upload(&problem_id, &correct_solution, pbinfo_user).await {
-            Ok(ok) => return Ok(ok),
-            Err(err) => match err {
-                UploadError::CooldownError => {
-                    tokio::time::sleep(Duration::from_secs(11)).await;
-                }
-                err => {
-                    return Err(SolveError::UploadError {
-                        problem_id: problem_id.to_string(),
-                        err: err,
-                    })
-                }
-            },
-        }
-    }
+    upload(&problem_id, &correct_solution, pbinfo_user)
+        .await
+        .map_err(|err| SolveError::UploadError {
+            problem_id: problem_id.to_string(),
+            err: err,
+        })
 }
