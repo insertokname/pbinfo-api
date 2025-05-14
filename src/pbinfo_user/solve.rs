@@ -1,6 +1,8 @@
+use std::sync::LazyLock;
 use std::time::Duration;
 
 use reqwest::StatusCode;
+use serde_json::Value;
 
 use super::upload::upload;
 use crate::pbinfo_user::PbinfoUser;
@@ -19,7 +21,15 @@ enum GetSolutionError {
     RequestParseTextError { err: String, url: String },
 }
 
+static SOLUTIONS: LazyLock<Value> =
+    LazyLock::new(|| serde_json::from_str(include_str!("solutions.json")).unwrap());
+
 async fn get_raw_solution(problem_id: &str) -> Result<String, GetSolutionError> {
+    if SOLUTIONS[problem_id].is_string() {
+        println!("local");
+        return Ok(SOLUTIONS[problem_id].to_string());
+    }
+
     let client = reqwest::Client::builder().build().map_err(|err| {
         GetSolutionError::CreateReqwestClientError {
             err: err.to_string(),
