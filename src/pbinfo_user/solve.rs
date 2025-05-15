@@ -23,9 +23,19 @@ enum GetSolutionError {
 static SOLUTIONS: LazyLock<Value> =
     LazyLock::new(|| serde_json::from_str(include_str!("solutions.json")).unwrap());
 
-async fn get_raw_solution(problem_id: &str) -> Result<String, GetSolutionError> {
+async fn get_raw_solution(
+    problem_id: &str,
+    costume_solutions: Option<&Value>,
+) -> Result<String, GetSolutionError> {
+    if let Some(some) = costume_solutions {
+        if some[problem_id].is_string() {
+            println!("Found a solution user provided custom_solutions!");
+            return Ok(some[problem_id].to_string());
+        }
+    }
+
     if SOLUTIONS[problem_id].is_string() {
-        println!("local");
+        println!("Found a solution in builtin solutions!");
         return Ok(SOLUTIONS[problem_id].to_string());
     }
 
@@ -72,14 +82,17 @@ pub enum SolveError {
     },
 }
 
-pub async fn solve(problem_id: &str, pbinfo_user: &PbinfoUser) -> Result<String, SolveError> {
-    let correct_solution =
-        get_raw_solution(problem_id)
-            .await
-            .map_err(|err| SolveError::GetSolutionError {
-                problem_id: problem_id.to_string(),
-                err: err.to_string(),
-            })?;
+async fn solve_helper(
+    problem_id: &str,
+    pbinfo_user: &PbinfoUser,
+    costume_solutions: Option<&Value>,
+) -> Result<String, SolveError> {
+    let correct_solution = get_raw_solution(problem_id, costume_solutions)
+        .await
+        .map_err(|err| SolveError::GetSolutionError {
+            problem_id: problem_id.to_string(),
+            err: err.to_string(),
+        })?;
 
     upload(&problem_id, &correct_solution, pbinfo_user)
         .await
@@ -87,4 +100,16 @@ pub async fn solve(problem_id: &str, pbinfo_user: &PbinfoUser) -> Result<String,
             problem_id: problem_id.to_string(),
             err: err,
         })
+}
+
+pub async fn solve(problem_id: &str, pbinfo_user: &PbinfoUser) -> Result<String, SolveError> {
+    solve_helper(problem_id, pbinfo_user, None).await
+}
+
+pub async fn costume_solve(
+    problem_id: &str,
+    costume_solutions: &Value,
+    pbinfo_user: &PbinfoUser,
+) -> Result<String, SolveError> {
+    solve_helper(problem_id, pbinfo_user, Some(costume_solutions)).await
 }

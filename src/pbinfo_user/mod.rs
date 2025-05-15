@@ -171,12 +171,27 @@ impl PbinfoUser {
         upload::upload(problem_id, source, self).await
     }
 
-    /// ### !!! Under development !!!
     /// Looks up a source code solution to the given problem.
     /// If it finds it, the source code will be uploaded and a solution id
     /// will be returned
     pub async fn solve(&self, problem_id: &str) -> Result<String, SolveError> {
         solve::solve(problem_id, self).await
+    }
+
+    /// Similar to [PbinfoUser::solve] but it also accepts a json of costume solutions
+    /// in a format like:
+    /// ```json
+    /// {
+    ///     "problem id":"solution",
+    ///     "problem id":"solution"
+    /// }
+    /// ```
+    pub async fn costume_solve(
+        &self,
+        problem_id: &str,
+        costume_solutions: &serde_json::Value,
+    ) -> Result<String, SolveError> {
+        solve::costume_solve(problem_id, costume_solutions, self).await
     }
 
     /// Returns information about the top solution given to a problem
