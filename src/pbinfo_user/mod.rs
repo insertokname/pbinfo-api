@@ -157,6 +157,15 @@ impl PbinfoUser {
         login::login(self).await
     }
 
+    // Resets all non credential fields and logs the user with fresh credentials
+    pub async fn fresh_login(&mut self) -> Result<(), LoginError> {
+        self.ssid = make_random_form_ssid();
+        self.form_token = make_random_form_token();
+        self.user_id = "".to_string();
+        self.login().await?;
+        Ok(())
+    }
+
     /// Uploads a source and returns a solution id
     pub async fn upload(&self, problem_id: &str, source: &str) -> Result<String, UploadError> {
         upload::upload(problem_id, source, self).await
