@@ -27,16 +27,21 @@ async fn get_raw_solution(
     problem_id: &str,
     costume_solutions: Option<&Value>,
 ) -> Result<String, GetSolutionError> {
-    if let Some(some) = costume_solutions {
-        if some[problem_id].is_string() {
+    if let Some(val) = costume_solutions {
+        if let Some(solution) = val[problem_id].as_str() {
             println!("Found a solution user provided custom_solutions!");
-            return Ok(some[problem_id].to_string());
+            return Ok(solution.to_string());
         }
+    }
+
+    if let Some(solution) = SOLUTIONS[problem_id].as_str() {
+        println!("Found a solution from builtin solutions!");
+        return Ok(solution.to_string());
     }
 
     if SOLUTIONS[problem_id].is_string() {
         println!("Found a solution in builtin solutions!");
-        return Ok(SOLUTIONS[problem_id].to_string());
+        return Ok(SOLUTIONS[problem_id].as_str().unwrap().to_string());
     }
 
     let client = reqwest::Client::builder().build().map_err(|err| {
